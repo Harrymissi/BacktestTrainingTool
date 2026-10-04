@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>期货复盘训练</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/lite-chart-fallback.js?v=15"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script>window.lucide || (window.lucide = { createIcons: function () {} })</script>
+  </head>
+  <body>
+    <div class="app">
+      <aside class="side">
+        <header class="brand">
+          <h1>期货复盘训练</h1>
+          <span id="statusText">准备就绪</span>
+        </header>
+
+        <section class="panel">
+          <h2>训练设置</h2>
+          <label>品种<select id="instrument"></select></label>
+          <label>合约类型<select id="contractType"></select></label>
+          <label>周期<select id="timeframe"></select></label>
+          <label>开始时间<input id="startDate" type="datetime-local" /></label>
+          <label>结束时间<input id="endDate" type="datetime-local" /></label>
+          <label>初始资金<input id="capital" type="number" value="100000" min="1" step="1000" /></label>
+          <div class="button-row">
+            <button id="downloadBtn"><i data-lucide="database"></i>下载/更新</button>
+            <button id="startBtn"><i data-lucide="play"></i>开始</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>播放</h2>
+          <div class="button-row three">
+            <button id="prevBtn" disabled><i data-lucide="step-back"></i>上一根</button>
+            <button id="playBtn" disabled><i data-lucide="play"></i>播放</button>
+            <button id="pauseBtn" disabled><i data-lucide="pause"></i>暂停</button>
+          </div>
+          <button id="stepBtn" disabled><i data-lucide="step-forward"></i>下一根</button>
+          <label>速度<select id="speed">
+            <option value="1000">1x</option>
+            <option value="500">2x</option>
+            <option value="200">5x</option>
+            <option value="100">10x</option>
+          </select></label>
+        </section>
+
+        <section class="panel">
+          <h2>开仓参数</h2>
+          <label>风险比例 %<input id="riskPercent" type="number" value="1" min="0" step="0.1" /></label>
+          <label class="checkbox-row"><input id="autoQuantity" type="checkbox" checked />按风险自动计算手数</label>
+          <label>手数<input id="quantity" type="number" value="1" min="1" step="1" /></label>
+          <div class="hint-line">建议手数 <b id="suggestedQty">-</b></div>
+          <label>止盈止损模式<select id="riskMode">
+            <option value="points">按点数</option>
+            <option value="price">按目标价</option>
+          </select></label>
+          <label><span id="takeProfitLabel">止盈点数</span><input id="takeProfit" type="number" value="30" min="0" step="1" /></label>
+          <label><span id="stopLossLabel">止损点数</span><input id="stopLoss" type="number" value="20" min="0" step="1" /></label>
+          <div class="button-row">
+            <button id="longBtn" disabled><i data-lucide="trending-up"></i>做多</button>
+            <button id="shortBtn" disabled><i data-lucide="trending-down"></i>做空</button>
+          </div>
+          <button id="closeBtn" disabled><i data-lucide="square"></i>手动平仓</button>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <div class="chart-head">
+          <div>
+            <strong id="chartTitle">未加载行情</strong>
+            <span id="barInfo"></span>
+          </div>
+          <div class="stats">
+            <span>浮盈 <b id="floatingPnl">0.00</b></span>
+            <span>总盈亏 <b id="totalPnl">0.00</b></span>
+            <span>交易 <b id="tradeCount">0</b></span>
+          </div>
+        </div>
+        <div id="priceChart" class="price-chart"></div>
+        <div id="macdChart" class="macd-chart"></div>
+        <div class="trade-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>方向</th>
+                <th>开仓时间</th>
+                <th>开仓价</th>
+                <th>平仓时间</th>
+                <th>平仓价</th>
+                <th>手数</th>
+                <th>盈亏</th>
+                <th>原因</th>
+              </tr>
+            </thead>
+            <tbody id="tradeRows"></tbody>
+          </table>
+        </div>
+      </main>
+
+      <aside class="right">
+        <section class="panel position">
+          <h2>当前持仓</h2>
+          <dl>
+            <dt>方向</dt><dd id="posDirection">无</dd>
+            <dt>开仓价</dt><dd id="posEntry">-</dd>
+            <dt>止盈</dt><dd id="posTp">-</dd>
+            <dt>止损</dt><dd id="posSl">-</dd>
+            <dt>手数</dt><dd id="posQty">-</dd>
+          </dl>
+          <button id="saveBtn" disabled><i data-lucide="save"></i>结束并保存</button>
+        </section>
+
+        <section class="panel history">
+          <h2>历史复盘</h2>
+          <div id="sessionList" class="session-list"></div>
+        </section>
+      </aside>
+    </div>
+    <script src="/app.js?v=15"></script>
+  </body>
+</html>
