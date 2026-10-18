@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Lock
 from urllib.parse import parse_qs, urlparse
 
 from instruments import CONTRACT_TYPES, INSTRUMENTS, TIMEFRAMES, get_instrument, tq_symbol
@@ -28,6 +31,8 @@ def load_env() -> None:
 
 load_env()
 DB_PATH = ROOT / os.environ.get("DB_PATH", "data/backtest.db")
+DOWNLOAD_LOCK = Lock()
+DOWNLOAD_TIMEOUT = 120
 
 
 def connect() -> sqlite3.Connection:
@@ -154,6 +159,43 @@ def fetch_cached_bars(params):
     return rows_to_bars(rows)
 
 
+def run_download_process(payload):
+    import psutil
+
+    with subprocess.Popen(
+        [sys.executable, "-X", "utf8", str(ROOT / "app" / "download_worker.py")],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", cwd=ROOT,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    ) as worker:
+        try:
+            stdout, stderr = worker.communicate(json.dumps(payload), timeout=DOWNLOAD_TIMEOUT)
+        except subprocess.TimeoutExpired as exc:
+            # Windows venv launchers create a second Python process. Stop both
+            # so a timed-out SDK cannot keep running or hold its cache lock.
+            try:
+                children = psutil.Process(worker.pid).children(recursive=True)
+            except psutil.NoSuchProcess:
+                children = []
+            for child in reversed(children):
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            worker.kill()
+            worker.communicate()
+            psutil.wait_procs(children, timeout=5)
+            raise RuntimeError("行情下载超过 120 秒，已停止。请缩短时间区间后重试") from exc
+    if stderr:
+        print(stderr.rstrip(), file=sys.stderr, flush=True)
+    if not stdout.strip():
+        raise RuntimeError("行情下载进程异常退出，请查看服务日志")
+    downloaded = json.loads(stdout)
+    if worker.returncode or "error" in downloaded:
+        raise RuntimeError(downloaded.get("error", "行情下载失败"))
+    return downloaded
+
+
 def download_tq_bars(params):
     account = os.environ.get("TQ_ACCOUNT")
     password = os.environ.get("TQ_PASSWORD")
@@ -168,24 +210,19 @@ def download_tq_bars(params):
     duration = TIMEFRAMES[timeframe]["seconds"]
     symbol = tq_symbol(instrument_id, contract_type)
 
+    if end_ts <= start_ts:
+        raise ValueError("结束时间必须晚于开始时间")
+    if not DOWNLOAD_LOCK.acquire(blocking=False):
+        raise RuntimeError("已有行情下载正在进行，请等待完成后再试")
     try:
-        from tqsdk import TqApi, TqAuth
-    except ImportError as exc:
-        raise RuntimeError("未安装 tqsdk，请先运行 pip install -r requirements.txt") from exc
-
-    api = TqApi(auth=TqAuth(account, password))
-    try:
-        df = api.get_kline_data_series(
-            symbol=symbol,
-            duration_seconds=duration,
-            start_dt=to_tq_datetime(start_ts),
-            end_dt=to_tq_datetime(end_ts),
-        )
+        # Isolate SDK file locks/network waits so a timeout can stop the work too.
+        downloaded = run_download_process({"symbol": symbol, "duration": duration,
+                                           "start": start_ts, "end": end_ts})
     finally:
-        api.close()
+        DOWNLOAD_LOCK.release()
 
     records = []
-    for _, row in df.iterrows():
+    for row in downloaded["rows"]:
         ns = int(row.get("datetime", 0))
         if ns <= 0:
             continue

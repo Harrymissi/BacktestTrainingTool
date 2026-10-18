@@ -19,6 +19,7 @@ const state = {
   lastVisibleRange: null,
   config: null,
   currentInstrument: null,
+  loading: false,
 };
 
 const priceChart = LightweightCharts.createChart($("priceChart"), {
@@ -104,16 +105,39 @@ function apiGet(url) {
   });
 }
 
-function apiPost(url, body) {
-  return fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }).then(async (res) => {
+async function apiPost(url, body) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 150000);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || "请求失败");
     return data;
-  });
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error("请求超时，请检查服务后重试");
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function runDataAction(fn) {
+  if (state.loading) return;
+  state.loading = true;
+  $("downloadBtn").disabled = true;
+  $("startBtn").disabled = true;
+  try {
+    await run(fn);
+  } finally {
+    state.loading = false;
+    $("downloadBtn").disabled = false;
+    $("startBtn").disabled = false;
+  }
 }
 
 function initDates() {
@@ -206,13 +230,8 @@ function withLookback(config) {
 async function downloadData() {
   const config = readConfig();
   setStatus("下载中");
-  $("downloadBtn").disabled = true;
-  try {
-    const data = await apiPost("/api/download", withLookback(config));
-    setStatus(`已缓存 ${data.bars.length} 根`);
-  } finally {
-    $("downloadBtn").disabled = false;
-  }
+  const data = await apiPost("/api/download", withLookback(config));
+  setStatus(`已缓存 ${data.bars.length} 根`);
 }
 
 async function startTraining() {
@@ -718,7 +737,7 @@ async function refreshSessions() {
     </button>`;
   }).join("");
   [...$("sessionList").querySelectorAll("button")].forEach((btn) => {
-    btn.addEventListener("click", () => loadSession(Number(btn.dataset.id)));
+    btn.addEventListener("click", () => runDataAction(() => loadSession(Number(btn.dataset.id))));
   });
 }
 
@@ -742,8 +761,8 @@ async function loadSession(id) {
 }
 
 function wireEvents() {
-  $("downloadBtn").addEventListener("click", () => run(downloadData));
-  $("startBtn").addEventListener("click", () => run(startTraining));
+  $("downloadBtn").addEventListener("click", () => runDataAction(downloadData));
+  $("startBtn").addEventListener("click", () => runDataAction(startTraining));
   $("prevBtn").addEventListener("click", previousStep);
   $("playBtn").addEventListener("click", play);
   $("pauseBtn").addEventListener("click", pause);
